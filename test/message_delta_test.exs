@@ -1010,6 +1010,54 @@ defmodule LangChain.MessageDeltaTest do
                }
              }
     end
+
+    test "handles content list with unknown types like reference" do
+      # Mistral sometimes returns content as a list with reference and text types
+      # This should not crash and should extract the text content
+      primary = %MessageDelta{
+        role: :assistant,
+        merged_content: [],
+        status: :incomplete
+      }
+
+      delta = %MessageDelta{
+        role: :assistant,
+        content: [
+          %{"reference_ids" => [], "type" => "reference"},
+          %{"text" => "{\"entries", "type" => "text"}
+        ],
+        index: 0,
+        status: :incomplete
+      }
+
+      merged = MessageDelta.merge_delta(primary, delta)
+
+      # Should have extracted the text content and skipped the reference
+      assert merged.merged_content == [ContentPart.text!("{\"entries")]
+    end
+
+    test "handles content list with only unknown types" do
+      # When content list has only unknown types, should not crash
+      primary = %MessageDelta{
+        role: :assistant,
+        merged_content: [ContentPart.text!("existing")],
+        status: :incomplete
+      }
+
+      delta = %MessageDelta{
+        role: :assistant,
+        content: [
+          %{"reference_ids" => ["ref1"], "type" => "reference"}
+        ],
+        index: 0,
+        status: :incomplete
+      }
+
+      merged = MessageDelta.merge_delta(primary, delta)
+
+      # Should preserve existing content and skip unknown types
+      assert merged.merged_content == [ContentPart.text!("existing")]
+    end
   end
 
   describe "merge_deltas/2" do
@@ -1364,6 +1412,100 @@ defmodule LangChain.MessageDeltaTest do
       {:error, reason} = MessageDelta.to_message(delta)
       assert reason == "tool_calls: arguments: invalid json"
     end
+
+    test "allows normal content that starts with lowercase words" do
+      # Normal content should not be flagged as malformed tool call
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: [
+          ContentPart.text!("get started with the project by reading the documentation")
+        ],
+        tool_calls: [],
+        status: :complete
+      }
+
+      {:ok, %Message{} = msg} = MessageDelta.to_message(delta)
+      assert msg.role == :assistant
+    end
+
+    test "allows content with JSON that doesn't look like tool call" do
+      # Content with JSON but not tool call pattern
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: [
+          ContentPart.text!("Here is the data: {\"name\": \"test\"}")
+        ],
+        tool_calls: [],
+        status: :complete
+      }
+
+      {:ok, %Message{} = msg} = MessageDelta.to_message(delta)
+      assert msg.role == :assistant
+    end
+
+    test "allows valid tool calls without triggering malformed detection" do
+      # When tool_calls is properly populated, don't check content
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: [],
+        tool_calls: [
+          ToolCall.new!(%{
+            call_id: "call_123",
+            name: "get_festival",
+            arguments: "{\"id\": \"abc-123\"}"
+          })
+        ],
+        status: :complete
+      }
+
+      {:ok, %Message{} = msg} = MessageDelta.to_message(delta)
+      assert msg.role == :assistant
+      assert length(msg.tool_calls) == 1
+    end
+
+    test "rejects empty assistant message with no content and no tool_calls" do
+      # Mistral sometimes returns completely empty assistant messages
+      # which violate conversation flow rules
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: [],
+        tool_calls: [],
+        status: :complete
+      }
+
+      {:error, reason} = MessageDelta.to_message(delta)
+      assert reason =~ "Empty assistant message"
+    end
+
+    test "rejects empty assistant message with nil content and nil tool_calls" do
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: nil,
+        tool_calls: nil,
+        status: :complete
+      }
+
+      {:error, reason} = MessageDelta.to_message(delta)
+      assert reason =~ "Empty assistant message"
+    end
+
+    test "handles merged_content with nil values from index padding" do
+      # merged_content can have nil values when content parts arrive at
+      # non-sequential indices (e.g., thinking at 0, text at 2, leaving 1 as nil)
+      delta = %LangChain.MessageDelta{
+        role: :assistant,
+        merged_content: [
+          ContentPart.text!("Hello"),
+          nil,
+          ContentPart.text!("World")
+        ],
+        tool_calls: [],
+        status: :complete
+      }
+
+      {:ok, %Message{} = msg} = MessageDelta.to_message(delta)
+      assert msg.role == :assistant
+    end
   end
 
   describe "migrate_to_content_parts/1" do
@@ -1427,6 +1569,113 @@ defmodule LangChain.MessageDeltaTest do
                role: :assistant,
                status: :incomplete
              }
+    end
+  end
+
+  describe "add_tool_display_info/2" do
+    test "adds tool info to nil delta" do
+      tool_info = %{call_id: "call_123", name: "write_file", display_name: "Writing file..."}
+      delta = MessageDelta.add_tool_display_info(nil, tool_info)
+
+      assert [^tool_info] = MessageDelta.get_tool_display_info(delta)
+    end
+
+    test "adds tool info to existing delta" do
+      delta = %MessageDelta{
+        content: "Hello",
+        role: :assistant,
+        status: :incomplete
+      }
+
+      tool_info = %{call_id: "call_123", name: "write_file", display_name: "Writing file..."}
+      updated_delta = MessageDelta.add_tool_display_info(delta, tool_info)
+
+      assert [^tool_info] = MessageDelta.get_tool_display_info(updated_delta)
+    end
+
+    test "adds multiple tool calls" do
+      delta = nil
+      tool1 = %{call_id: "call_1", name: "read_file"}
+      tool2 = %{call_id: "call_2", name: "write_file"}
+
+      delta = MessageDelta.add_tool_display_info(delta, tool1)
+      delta = MessageDelta.add_tool_display_info(delta, tool2)
+
+      tools = MessageDelta.get_tool_display_info(delta)
+      assert length(tools) == 2
+      assert Enum.any?(tools, &(&1.call_id == "call_1"))
+      assert Enum.any?(tools, &(&1.call_id == "call_2"))
+    end
+
+    test "updates existing tool call by call_id" do
+      tool_info = %{call_id: "call_123", name: "write_file", status: :streaming}
+      delta = MessageDelta.add_tool_display_info(nil, tool_info)
+
+      updated_info = %{call_id: "call_123", name: "write_file", status: :complete}
+      delta = MessageDelta.add_tool_display_info(delta, updated_info)
+
+      [tool] = MessageDelta.get_tool_display_info(delta)
+      assert tool.status == :complete
+    end
+
+    test "preserves other metadata" do
+      delta = %MessageDelta{
+        content: "Hello",
+        role: :assistant,
+        status: :incomplete,
+        metadata: %{usage: %{input: 10, output: 5}, custom: "data"}
+      }
+
+      tool_info = %{call_id: "call_123", name: "write_file"}
+      updated_delta = MessageDelta.add_tool_display_info(delta, tool_info)
+
+      assert updated_delta.metadata.usage == %{input: 10, output: 5}
+      assert updated_delta.metadata.custom == "data"
+      assert [^tool_info] = MessageDelta.get_tool_display_info(updated_delta)
+    end
+  end
+
+  describe "get_tool_display_info/1" do
+    test "returns empty list for nil delta" do
+      assert MessageDelta.get_tool_display_info(nil) == []
+    end
+
+    test "returns empty list for delta with no tool display info" do
+      delta = %MessageDelta{
+        content: "Hello",
+        role: :assistant,
+        status: :incomplete
+      }
+
+      assert MessageDelta.get_tool_display_info(delta) == []
+    end
+
+    test "returns empty list for delta with empty metadata" do
+      delta = %MessageDelta{
+        content: "Hello",
+        role: :assistant,
+        status: :incomplete,
+        metadata: %{}
+      }
+
+      assert MessageDelta.get_tool_display_info(delta) == []
+    end
+
+    test "returns tool calls from metadata" do
+      tool1 = %{call_id: "call_1", name: "read_file"}
+      tool2 = %{call_id: "call_2", name: "write_file"}
+
+      delta = %MessageDelta{
+        content: "Hello",
+        role: :assistant,
+        status: :incomplete,
+        metadata: %{streaming_tool_calls: [tool1, tool2]}
+      }
+
+      tools = MessageDelta.get_tool_display_info(delta)
+      assert length(tools) == 2
+      assert Enum.any?(tools, &(&1.call_id == "call_1"))
+      assert Enum.any?(tools, &(&1.call_id == "call_2"))
     end
   end
 end
