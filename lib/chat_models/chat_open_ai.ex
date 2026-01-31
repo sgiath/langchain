@@ -1134,7 +1134,12 @@ defmodule LangChain.ChatModels.ChatOpenAI do
         "message" => message,
         "index" => index
       }) do
-    status = finish_reason_to_status(finish_reason)
+      # For non-streaming Message responses, default to :complete when finish_reason is nil
+      status =
+        case finish_reason_to_status(finish_reason) do
+          :incomplete -> :complete
+          other -> other
+        end
 
     case Message.new(Map.merge(message, %{"status" => status, "index" => index})) do
       {:ok, message} ->
