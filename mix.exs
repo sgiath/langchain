@@ -48,7 +48,7 @@ defmodule LangChain.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ecto, "~> 3.10 or ~> 3.11"},
+      {:ecto, "~> 3.10"},
       {:gettext, "~> 0.26.2 or ~> 1.0.0"},
       {:req, ">= 0.5.3"},
       {:mint_web_socket, "~> 1.0", optional: true},

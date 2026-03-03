@@ -41,7 +41,7 @@ defmodule LangChain.Trajectory.Assertions do
       expected_val = unquote(expected)
       opts_val = unquote(opts)
 
-      unless LangChain.Trajectory.matches?(actual_val, expected_val, opts_val) do
+      if not LangChain.Trajectory.matches?(actual_val, expected_val, opts_val) do
         actual_calls = LangChain.Trajectory.Assertions.extract_tool_calls(actual_val)
         expected_calls = LangChain.Trajectory.Assertions.extract_tool_calls(expected_val)
 
@@ -103,7 +103,7 @@ defmodule LangChain.Trajectory.Assertions do
       name_b_val = unquote(name_b)
       opts_val = unquote(opts)
 
-      unless LangChain.Trajectory.called_before?(actual_val, name_a_val, name_b_val, opts_val) do
+      if not LangChain.Trajectory.called_before?(actual_val, name_a_val, name_b_val, opts_val) do
         actual_calls = LangChain.Trajectory.Assertions.extract_tool_calls(actual_val)
 
         raise ExUnit.AssertionError,

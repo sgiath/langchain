@@ -321,7 +321,7 @@ defmodule LangChain.Trajectory do
     mode = Keyword.get(opts, :mode, :strict)
     args_mode = Keyword.get(opts, :args, :exact)
 
-    unless args_mode in [:exact, :subset] do
+    if args_mode not in [:exact, :subset] do
       raise ArgumentError,
             "unknown args mode: #{inspect(args_mode)}, expected :exact or :subset"
     end
