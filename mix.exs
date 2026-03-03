@@ -24,7 +24,6 @@ defmodule LangChain.MixProject do
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
@@ -40,26 +39,19 @@ defmodule LangChain.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ecto, "~> 3.10 or ~> 3.11"},
-      {:gettext, "~> 0.26.2 or ~> 1.0.0"},
+      {:ecto, "~> 3.10"},
+      {:gettext, "~> 0.26.2 or ~> 1.0"},
       {:req, ">= 0.5.2"},
       {:nimble_parsec, "~> 1.4", optional: true},
-      {:abacus, "~> 2.1.0", optional: true},
+      {:abacus, "~> 2.1", optional: true},
       {:nx, ">= 0.7.0", optional: true},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:mimic, "~> 1.8", only: :test}
     ]
   end
 
-  # Aliases are shortcuts or tasks specific to the current project.
-  # For example, before performing a commit, run the following checks:
-  #
-  #     $ mix precommit
-  #
-  # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
       precommit: ["compile --warning-as-errors", "deps.unlock --unused", "format", "test"]
